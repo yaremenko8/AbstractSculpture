@@ -6,6 +6,7 @@ import scipy.linalg
 from sympy import Piecewise
 
 from .. import isometry as iso
+from ..editor import graphics
 from ..utils import *
 
 eps = 10e-100
@@ -91,6 +92,9 @@ class Shape:
 
     def __call__(self, *args, **kwargs):
         return self.distance(*args, **kwargs)
+
+    def display(self):
+        return graphics.display(self)
 
 
 class Sphere(Shape):

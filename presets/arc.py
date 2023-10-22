@@ -5,7 +5,7 @@ import re
 
 T = sp.symbols('T')
 I = sp.eye(3)
-e1 = I[:, 0] * (0.55 + 0.45 * sp.sin(T))
+e1 = I[:, 0] #* (0.55 + 0.45 * sp.sin(T))
 e2 = I[:, 1]
 e3 = I[:, 2]
 O = I[:, 0] * 0.0
@@ -16,8 +16,12 @@ triangle = shape.core.Triangle(e1, e2, e3)
 simplex = shape.core.Simplex(e1, e2, e3, O)
 spiky = isometry.IcosahedralGroup() @ simplex
 
-expr = spiky(p)
+spiky.display()
+spiky.display()
+#exit()
+input()
 
+expr = spiky(p)
 
 def expression_to_glsl(expr):
     #expr = sp.glsl_code(expr) # It appears that Max, Min get converted to pure C, which takes a ridiculous ammount of time and produces a massive expression
@@ -158,7 +162,7 @@ FRAGMENT_SHADER = '''
 
 #define FAR 160.0
 #define MARCHING_MINSTEP 0
-#define MARCHING_STEPS 1024
+#define MARCHING_STEPS 512
 #define MARCHING_CLAMP 0.000001
 #define NRM_OFS 0.0001
 #define AO_OFS 0.00001
@@ -316,7 +320,7 @@ float raymarch(vec3 o, vec3 r, inout vec3 c)
         {
             return t;
         }
-        t += d;
+        t += d * 0.6;
     }
     return FAR;
 }
