@@ -5,6 +5,13 @@ import sympy as sp
 from sympy import Piecewise
 
 
+class ConcreteFunction(sp.core.function.UndefinedFunction):
+    def __new__(mcl, implementation, bases=(sp.core.function.AppliedUndef,), __dict__=None, **kwargs):
+        obj = super().__new__(mcl, "f" + str(id(implementation)), bases, __dict__, **kwargs)
+        obj.implementation = implementation
+        return obj
+
+
 class SymmetricaTypeError(TypeError):
     def __init__(self, object, *expected_types):
         if len(expected_types) > 1:
@@ -20,10 +27,10 @@ class SymmetricaTypeError(TypeError):
 
 
 def norm(vector):
-    return (vector.T @ vector) ** 0.5
+    return sp.sqrt(vector.T @ vector)
 
 def abs(number):
-    return (number ** 2) ** 0.5
+    return sp.sqrt(number ** 2)
 
 def cross(x, y):
     return x.cross(y)
@@ -45,9 +52,9 @@ def inv(A):
     :param A: matrix to invert
     :return: inverted matrix
     """
-    if isinstance(np.ndarray, A):
+    if isinstance(A, np.ndarray):
         return np.linalg.inv(A)
-    elif isinstance(sp.Matrix, A):
+    elif isinstance(A, sp.Matrix):
         return A.inv()
     else:
         raise SymmetricaTypeError(A, np.ndarray, sp.Matrix)
@@ -88,7 +95,9 @@ def stack(*vectors):
     for vector in vectors:
         if not isinstance(vector, np.ndarray):
             symbolic = True
-        rows.append(vector.reshape(size, 1))
+            rows.append(vector)
+        else:
+            rows.append(vector.reshape(3, 1))
     if symbolic:
         return sp.Matrix(sp.BlockMatrix([rows])).T
     else:

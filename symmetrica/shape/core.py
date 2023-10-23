@@ -12,6 +12,15 @@ from ..utils import *
 eps = 10e-100
 
 
+
+T = sp.symbols('T')
+I = sp.eye(3)
+O = I[:, 0] * 0.0
+e1 = I[:, 0]
+e2 = I[:, 1]
+e3 = I[:, 2]
+
+
 class Shape:
     def __init__(self, distance_function):
         self.distance = distance_function
@@ -42,13 +51,13 @@ class Shape:
             try:
                 return Shape(lambda x: self.distance(x / other))
             except ZeroDivisionError:
-                return Shape(lambda x: (x @ x)**0.5)
+                return Shape(lambda x: norm(x))
         else:
             raise TypeError("A shape can only be multiplied by a number or another shape.")
 
     def __sub__(self, other):
-        assert isinstance(Shape, other)
-        if isinstance(Shape, other):
+        assert isinstance(other, Shape)
+        if isinstance(other, Shape):
             return Shape(lambda x: Max(self.distance(x), -other.distance(x)))
         elif isinstance(float, other) or isinstance(int, other) or isinstance(other, sp.Symbol) or isinstance(other, np.ndarray):
             return Shape(lambda x: self.distance(x + other))
@@ -73,17 +82,18 @@ class Shape:
         elif isinstance(other, iso.SymmetryGroup):
             def distance_symmetry(p): # Works due to the existence of an inverse within the same group
                 a, b, c = sp.symbols('a b c')
-                h = sp.Matrix([[a], [b], [c]])
-                distance_base = self.distance(h)
+                # h = sp.Matrix([[a], [b], [c]])
+                distance_base = ConcreteFunction(self.distance)
                 distances = []
-                for element in other:
+                for element in other.elements[:40]:
                     rhs = element.action.operator @ p
-                    H = [s for s in h]
+                    # H = [s for s in h]
                     RHS = [s for s in rhs]
-                    distance = distance_base
+                    # distance = distance_base
                     with sp.evaluate(False):
-                        for i in range(3):
-                            distance = distance.subs(H[i], RHS[i])
+                        distance = distance_base(*RHS)
+                        # for i in range(3):
+                        #     distance = distance.subs(H[i], RHS[i])
                     distances.append(distance)
                 return sp.Min(*distances, evaluate=False)
             return Shape(distance_symmetry)
@@ -161,7 +171,9 @@ class PlanarShape:
         if isinstance(planar_distance_function, PlanarShape):
             planar_distance_function = planar_distance_function.planar_distance
         if planar_distance_function.__code__.co_argcount == 1:
-            planar_distance_function = lambda x, t: planar_distance_function(x)
+            def new_planar_distance_function(x, t, old=planar_distance_function):
+                return old(x)
+            planar_distance_function = new_planar_distance_function
         self.planar_distance = planar_distance_function
         self.planar_distance = self.rotation_symmetry(rotation_images).planar_distance
         if twist_degrees != 0:
@@ -216,7 +228,7 @@ class PlanarShape:
             try:
                 return PlanarShape(lambda x: self(x / other))
             except ZeroDivisionError:
-                return PlanarShape(lambda x: (x @ x) ** 0.5)
+                return PlanarShape(lambda x: norm(x))
         else:
             raise TypeError("A PlanarShape can only be multiplied with a vector, a number or another PlanarShape.")
 
@@ -272,19 +284,21 @@ class PlanarTriangle(PlanarShape):
             interior = points[i - 2]
             Q, _ = qr(stack(direction - origin, interior - origin).T)
             normal = Q[:, 1]
-            normal *= 1 - 2 * ind((normal.T @ interior)[0] < 0)
-            half_planes.append(lambda p:  normal @ p)
+            normal *= 1 - 2 * ind((normal.T @ (interior - origin))[0] > 0)
+            def half_plane_distance(p, origin=origin, normal=normal):
+                return (normal.T @ (p - origin))[0, 0]
+            half_planes.append(half_plane_distance)
         hp1, hp2, hp3 = half_planes
         distance_function = lambda p: Max(hp1(p), Max(hp2(p), hp3(p))) - 1e-10
         super().__init__(distance_function)
 
 class TwistedEquilateralTriangle(PlanarTriangle):
     def __init__(self, r, third_turns=0):
-        p1 = np.array([np.cos(np.pi / 2), np.sin(np.pi / 2)])
-        p2 = np.array([np.cos(np.pi / 3 + np.pi / 2),
-                       np.sin(np.pi / 3 + np.pi / 2)])
-        p3 = np.array([np.cos(2 * np.pi / 3 + np.pi / 2),
-                       np.sin(2 * np.pi / 3 + np.pi / 2)])
+        p1 = sp.Matrix([sp.cos(sp.pi / 2), sp.sin(sp.pi / 2)])
+        p2 = sp.Matrix([sp.cos(sp.pi / 3 + sp.pi / 2),
+                       sp.sin(sp.pi / 3 + sp.pi / 2)])
+        p3 = sp.Matrix([sp.cos(2 * sp.pi / 3 + sp.pi / 2),
+                       sp.sin(2 * sp.pi / 3 + sp.pi / 2)])
         super().__init__(p1 * r, p2 * r, p3 * r, twist_degrees=120 * third_turns)
 
 
@@ -307,28 +321,28 @@ class ArcExtrusion(Shape):
             raise ValueError("Neither `intermediate_point` nor `center` were provided, which make the shape ambiguous.")
         self.plane, self.coords_of_edges = qr(stack(starting_point - center,
                                                     final_point - center).T)
-        self.starting_planar, self.final_planar = self.coords_of_edges.T
+        self.starting_planar, self.final_planar = self.coords_of_edges[:, 0], self.coords_of_edges[:, 1]
         self._projection_matrix = inv(self.plane.T @ self.plane) @ self.plane.T
         self.coords_of_edges_inv = inv(self.coords_of_edges)
-        self.normal = cross(self.plane.T[0], self.plane.T[1])
+        self.normal = cross(self.plane[:, 0], self.plane[:, 1])
 
         def distance(p):
             p_relative = p - center
             p_plane = self._projection_matrix @ p_relative
-            p_circle = self.radius * p_plane / (norm(p_plane) + eps)
-            starting_is_closer = p_circle.T @ self.starting_planar > p_circle.T @ self.final_planar
-            nearest = self.starting_planar * starting_is_closer + self.final_planar * (1 - starting_is_closer)
+            p_circle = self.radius[0, 0] * p_plane / (norm(p_plane)[0, 0] + eps)
+            starting_is_closer = (p_circle.T @ self.starting_planar)[0, 0] > (p_circle.T @ self.final_planar)[0, 0]
+            nearest = self.starting_planar * ind(starting_is_closer) + self.final_planar * (1 - ind(starting_is_closer))
             relative_coords = self.coords_of_edges_inv @ p_circle  # Test whether the projection is inside the cone
-            is_within_arc = Min(relative_coords) > 0               # spanned by `first_point` and `final_point`.
+            is_within_arc = ind(relative_coords[0, 0] > 0) * ind(relative_coords[1, 0] > 0)              # spanned by `first_point` and `final_point`.
             p_arc_plane = p_circle * is_within_arc + (1 - is_within_arc) * nearest
             p_arc = self.plane @ p_arc_plane
             lateral_plane, _ = qr(stack(self.normal, p_arc).T)
             lateral_projection_matrix = inv(lateral_plane.T @ lateral_plane) @ lateral_plane.T
             p_lateral = lateral_projection_matrix @ p_relative
-            lateral_planar_distance = self.planar_shape(p_lateral)
-            lateral_planar_distance = (lateral_planar_distance + abs(lateral_planar_distance)) / 2
-            distance_to_lateral_plane = norm(p_relative - lateral_plane @ p_lateral) # is the absence o negative interior bad?
-            return (lateral_planar_distance ** 2 + distance_to_lateral_plane ** 2) ** 0.5 - 1e-10
+            lateral_planar_distance = self.planar_shape(p_lateral - lateral_projection_matrix @ p_arc)
+            #lateral_planar_distance = (lateral_planar_distance + abs(lateral_planar_distance)) / 2
+            distance_to_lateral_plane = norm(p_relative - lateral_plane @ p_lateral)[0, 0] # is the absence o negative interior bad?
+            return  sp.Max(distance_to_lateral_plane, lateral_planar_distance)
 
         self.distance = distance
 

@@ -1,7 +1,10 @@
 import os
-
+import sys
+import pickle
 import moderngl_window as mglw
 import numpy as np
+from shared_memory_dict import SharedMemoryDict
+
 
 class Example(mglw.WindowConfig):
     gl_version = (3, 3)
@@ -58,4 +61,9 @@ def raymarch(VERTEX_SHADER, FRAGMENT_SHADER):
     Raymarching.run()
 
 if __name__ == "__main__":
-    raymarch(os.environ["VERTEX_SHADER"], os.environ["FRAGMENT_SHADER"])
+    smd = SharedMemoryDict(sys.argv[1], int(sys.argv[2]))
+    sys.argv = sys.argv[:1]
+    VERTEX_SHADER = str(smd["VERTEX_SHADER"])
+    FRAGMENT_SHADER = str(smd["FRAGMENT_SHADER"])
+    raymarch(VERTEX_SHADER, FRAGMENT_SHADER)
+    del smd

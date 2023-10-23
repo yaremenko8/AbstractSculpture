@@ -1,15 +1,29 @@
 import os
+import pickle
 import subprocess
+import tempfile
+from collections import OrderedDict
 
 import sympy as sp
 import re
 
+from shared_memory_dict import SharedMemoryDict
+from sympy.core.function import AppliedUndef
 
 
-
-def expression_to_glsl(expr):
+def expression_to_glsl(expr, processed=None, name='f'):
     # expr = sp.glsl_code(expr) # It appears that Max, Min get converted to pure C, which takes a ridiculous ammount of time and produces a massive expression
     # expr = sp.expand_power_exp(expr)
+    other_expression = []
+    if processed is None:
+        processed = OrderedDict()
+    processed[name] = None
+    for function_call in expr.atoms(AppliedUndef):
+        function = type(function_call)
+        f_name = str(function)
+        if f_name not in processed:
+            sub_expr = function.implementation(sp.Matrix(sp.symbols('p1 p2 p3', real=True)))
+            expression_to_glsl(sub_expr, processed=processed, name=f_name)
     expr = str(expr)
     for Ext, ext in [("Max", "max"), ("Min", "min")]:
         while Ext in expr:
@@ -37,12 +51,13 @@ def expression_to_glsl(expr):
             expr = expr[:Ext_idx] + ext + expr[Ext_idx + 3:]
     # expr = expr.replace("Max", "vmax")
     # expr = expr.replace("Min", "vmin")
-    expr = expr.replace("[0, 0]", ".x")
-    expr = expr.replace("[1, 0]", ".y")
-    expr = expr.replace("[2, 0]", ".z")
+    #expr = expr.replace("p1", "p.x")
+    #expr = expr.replace("p2", "p.y")
+    #expr = expr.replace("p3", "p.z")
     # expr = expr.replace("[0][0]", ".x")
     # expr = expr.replace("[1][0]", ".y")
     # expr = expr.replace("[2][0]", ".z")
+    expr = expr.replace("Abs", "abs")
     expr = re.sub(r"([A-Za-z0-9_\.]+)\*\*([0-9\.]+)", r"pow(\1, \2.0)", expr)
     expr = re.sub(r"Piecewise\(\(1,(.*?)\), \(0, True\)\)", r"float(\1)", expr)
     expr = re.sub(r"(\*\*|/)([0-9\.]+)", r"\1(\2.0)", expr)
@@ -58,22 +73,27 @@ def expression_to_glsl(expr):
             if expr[i + 1: i + 3] == '**':
                 argument_stacklevels[len(stack) - 2] = slice(stack[-1], i + 1)
             elif len(stack) - 2 in argument_stacklevels:
-                exponentiations.append((len(stack),
+                exponentiations.append([len(stack),
                                         expr[argument_stacklevels[len(stack) - 2]],
-                                        expr[stack[-1]: i + 1]))
+                                        expr[stack[-1]: i + 1]])
                 del argument_stacklevels[len(stack) - 2]
             stack.pop(-1)
     exponentiations.sort()
-    for _, left, right in exponentiations:
-        expr = expr.replace(f"{left}**{right}", f"pow({left}, {right})")
+    for i, (_, left, right) in enumerate(exponentiations):
+        expr = expr.replace(f"{left}**{right}", f"(pow({left}, {right}))")
+        for j in range(i, len(exponentiations)):
+            exponentiations[j][1] = exponentiations[j][1].replace(f"{left}**{right}", f"(pow({left}, {right}))")
+            exponentiations[j][2] = exponentiations[j][2].replace(f"{left}**{right}", f"(pow({left}, {right}))")
 
-    return expr
+    res = f"float {name}(float p1, float p2, float p3) {'{return ' + expr + ';}'}"
+    processed[name] = res
+    return processed
 
 
 
 
 def display(shape):
-    p = sp.MatrixSymbol('p', 3, 1)
+    p = sp.Matrix(sp.symbols('p1 p2 p3', real=True))
     expr = shape(p)
 
     VERTEX_SHADER = '''
@@ -198,6 +218,8 @@ def display(shape):
     {
         return sin(p.x * m) * sin(p.y * m) * sin(p.z * m) * s;
     }
+    
+    ''' + "\n".join(list(expression_to_glsl(expr).values())[::-1]) + '''
 
     // world
     float sample_world(vec3 p, inout vec3 c)
@@ -232,7 +254,7 @@ def display(shape):
         }
         p.xy = vec2(cos(T) * p.x + sin(T) * p.y, -sin(T) * p.x + cos(T) * p.y);
         p.xz = vec2(cos(T / 3.14) * p.x + sin(T / 3.14) * p.z, -sin(T / 3.14) * p.x + cos(T / 3.14) * p.z);
-        return ''' + expression_to_glsl(expr) + ''';//result;
+        return f(p.x, p.y, p.z);//result;
         
     }
 
@@ -309,8 +331,12 @@ def display(shape):
         out_color = vec4(color, 1.0);
     }
     '''
-    os.environ["VERTEX_SHADER"] = VERTEX_SHADER
-    os.environ["FRAGMENT_SHADER"] = FRAGMENT_SHADER
+    shm = f'symmetrica{hash(VERTEX_SHADER + FRAGMENT_SHADER)}'
+    size = 2 * (len(VERTEX_SHADER) + len(FRAGMENT_SHADER))
+    smd = SharedMemoryDict(name=shm, size=size)
+    smd["VERTEX_SHADER"] = VERTEX_SHADER
+    smd["FRAGMENT_SHADER"] = FRAGMENT_SHADER
     from .display import __file__ as display_file
-    subprocess.run(["python", display_file], env=os.environ)
+    subprocess.run(["python", display_file, shm, str(size)])
+    del smd
 
