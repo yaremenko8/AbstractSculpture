@@ -13,7 +13,7 @@ eps = 10e-100
 
 
 
-T = sp.symbols('T')
+T = sp.symbols('T', real=True)
 I = sp.eye(3)
 O = I[:, 0] * 0.0
 e1 = I[:, 0]
@@ -85,7 +85,7 @@ class Shape:
                 # h = sp.Matrix([[a], [b], [c]])
                 distance_base = ConcreteFunction(self.distance)
                 distances = []
-                for element in other.elements[:40]:
+                for element in other.elements:
                     rhs = element.action.operator @ p
                     # H = [s for s in h]
                     RHS = [s for s in rhs]
@@ -319,34 +319,27 @@ class ArcExtrusion(Shape):
             self.radius = norm(center - starting_point)
         else:
             raise ValueError("Neither `intermediate_point` nor `center` were provided, which make the shape ambiguous.")
-        self.plane, self.coords_of_edges = qr(stack(starting_point - center,
-                                                    final_point - center).T)
-        self.starting_planar, self.final_planar = self.coords_of_edges[:, 0], self.coords_of_edges[:, 1]
-        self._projection_matrix = inv(self.plane.T @ self.plane) @ self.plane.T
-        self.coords_of_edges_inv = inv(self.coords_of_edges)
-        self.normal = cross(self.plane[:, 0], self.plane[:, 1])
+        r_st, r_fn = starting_point - center, final_point - center
+        phi = sp.acos((r_st.T @ r_fn)[0])
+        z = r_st.cross(r_fn)
+        Q, _ = qr(stack(r_st, r_fn, z).T)
+        circle_distance = CircleExtrusion(planar_shape)
 
         def distance(p):
-            p_relative = p - center
-            p_plane = self._projection_matrix @ p_relative
-            p_circle = self.radius[0, 0] * p_plane / (norm(p_plane)[0, 0] + eps)
-            starting_is_closer = (p_circle.T @ self.starting_planar)[0, 0] > (p_circle.T @ self.final_planar)[0, 0]
-            nearest = self.starting_planar * ind(starting_is_closer) + self.final_planar * (1 - ind(starting_is_closer))
-            relative_coords = self.coords_of_edges_inv @ p_circle  # Test whether the projection is inside the cone
-            is_within_arc = ind(relative_coords[0, 0] > 0) * ind(relative_coords[1, 0] > 0)              # spanned by `first_point` and `final_point`.
-            p_arc_plane = p_circle * is_within_arc + (1 - is_within_arc) * nearest
-            p_arc = self.plane @ p_arc_plane
-            lateral_plane, _ = qr(stack(self.normal, p_arc).T)
-            lateral_projection_matrix = inv(lateral_plane.T @ lateral_plane) @ lateral_plane.T
-            p_lateral = lateral_projection_matrix @ p_relative
-            lateral_planar_distance = self.planar_shape(p_lateral - lateral_projection_matrix @ p_arc)
-            #lateral_planar_distance = (lateral_planar_distance + abs(lateral_planar_distance)) / 2
-            distance_to_lateral_plane = norm(p_relative - lateral_plane @ p_lateral)[0, 0] # is the absence o negative interior bad?
-            return  sp.Max(distance_to_lateral_plane, lateral_planar_distance)
+            p = p - center
+            p = Q.T @ p
+            circ = circle_distance(p)
+            angle = sp.atan2(p[0], p[1])
+            return sp.Max(circ, -angle, angle - phi)
 
-        self.distance = distance
+        super().__init__(distance)
 
 
+class CircleExtrusion(Shape):
+    def __init__(self, planar_shape):
+        def distance(p):
+            return planar_shape(sp.Matrix([sp.sqrt(p[0] ** 2 + p[1] ** 2) - 1, p[2]]), sp.atan2(p[0], p[1]))
+        super().__init__(distance)
 
 
 

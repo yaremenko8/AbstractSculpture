@@ -62,6 +62,7 @@ def expression_to_glsl(expr, processed=None, name='f'):
     expr = re.sub(r"Piecewise\(\(1,(.*?)\), \(0, True\)\)", r"float(\1)", expr)
     expr = re.sub(r"(\*\*|/)([0-9\.]+)", r"\1(\2.0)", expr)
     expr = re.sub(r"([0-9]\.[0-9])\.0", r"\1", expr)
+    expr = expr.replace("pi", "PI")
     exponentiations = []
     stack = []
     argument_stacklevels = {}
@@ -130,6 +131,12 @@ def display(shape):
 
     // out color
     out vec4 out_color;
+
+    float atan2(in float y, in float x)
+    {
+        bool s = (abs(x) > abs(y));
+        return mix(PI/2.0 - atan(x,y), atan(y,x), s);
+    }
 
     float vmax(float a, float b, float c, float e, float f)
     {

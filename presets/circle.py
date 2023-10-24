@@ -1,6 +1,6 @@
 from symmetrica import *
 
-simplex = ArcExtrusion(TwistedEquilateralTriangle(0.1, 2), e1, e2, center=O)
+simplex = CircleExtrusion(TwistedEquilateralTriangle(0.1, 2))
 shape = IcosahedralGroup() @ simplex
 
 shape.display()

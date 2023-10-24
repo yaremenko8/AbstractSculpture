@@ -11,6 +11,12 @@ class ConcreteFunction(sp.core.function.UndefinedFunction):
         obj.implementation = implementation
         return obj
 
+class LazyMatrix(sp.core.function.UndefinedFunction):
+    def __new__(mcl, mtx, bases=(sp.core.function.AppliedUndef,), __dict__=None, **kwargs):
+        obj = super().__new__(mcl, "M" + str(id(mtx)), bases, __dict__, **kwargs)
+        obj.mtx = mtx
+        return obj
+
 
 class SymmetricaTypeError(TypeError):
     def __init__(self, object, *expected_types):
